@@ -1,0 +1,113 @@
+version: "3.9"
+
+services:
+
+  postgres:
+    image: postgres:17
+    container_name: assessment-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: assessment
+      POSTGRES_USER: assessment
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - assessment-net
+
+  redis:
+    image: redis:8-alpine
+    container_name: assessment-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - assessment-net
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: assessment-api
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      DATABASE_URL: postgresql+psycopg://assessment:${POSTGRES_PASSWORD}@postgres:5432/assessment
+
+      REDIS_URL: redis://redis:6379/0
+
+      ENTRA_TENANT_ID: ${ENTRA_TENANT_ID}
+      ENTRA_CLIENT_ID: ${ENTRA_CLIENT_ID}
+      ENTRA_CLIENT_SECRET: ${ENTRA_CLIENT_SECRET}
+
+      CANVAS_BASE_URL: ${CANVAS_BASE_URL}
+      CANVAS_TOKEN: ${CANVAS_TOKEN}
+
+      SECRET_KEY: ${SECRET_KEY}
+    volumes:
+      - ./uploads:/app/uploads
+      - ./imports:/app/imports
+    ports:
+      - "8000:8000"
+    networks:
+      - assessment-net
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: assessment-worker
+    restart: unless-stopped
+    command: celery -A app.celery worker --loglevel=info
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      DATABASE_URL: postgresql+psycopg://assessment:${POSTGRES_PASSWORD}@postgres:5432/assessment
+      REDIS_URL: redis://redis:6379/0
+      CANVAS_BASE_URL: ${CANVAS_BASE_URL}
+      CANVAS_TOKEN: ${CANVAS_TOKEN}
+    volumes:
+      - ./uploads:/app/uploads
+      - ./imports:/app/imports
+    networks:
+      - assessment-net
+
+  scheduler:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: assessment-scheduler
+    restart: unless-stopped
+    command: celery -A app.celery beat --loglevel=info
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      DATABASE_URL: postgresql+psycopg://assessment:${POSTGRES_PASSWORD}@postgres:5432/assessment
+      REDIS_URL: redis://redis:6379/0
+    networks:
+      - assessment-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: assessment-frontend
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "3000:80"
+    networks:
+      - assessment-net
+
+networks:
+  assessment-net:
+
+volumes:
+  postgres_data:
